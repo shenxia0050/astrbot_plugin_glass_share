@@ -1,0 +1,29 @@
+name: astrbot_plugin_denia_share
+display_name: "希望解析器"
+short_desc: 链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam
+desc: |
+  自动解析各平台分享链接，渲染为分享卡片发送，并自带 Dashboard 管理页面。
+
+  支持 **B站 / 抖音 / 快手 / 微博 / 小红书 / Twitter(X) / AcFun / NGA / GitHub / Pixiv / Steam**
+  十一个平台（另有网页截图 `/shot` 与 Pixiv 搜索 `/pixiv`），也能用自定义解析器扩展新平台。
+
+  - 群里直接发链接即可解析，不需要命令
+  - 卡片 4 种布局 × 深浅双主题，强调色 / 渐变 / 水印可调
+  - 管理页面：总览、手动解析、缓存管理、界面与卡片外观、全部配置项
+  - Docker 分容器部署下视频发不出去时，可选共享缓存目录或媒体中转
+
+  详细说明见仓库 [README](https://github.com/xiaoxi2760/astrbot_plugin_denia_share#readme)。
+
+  MIT 许可；解析框架与卡片渲染等部分基于 astrbot_plugin_rika_share（MIT）与
+  Johnserf-Seed/f2（Apache-2.0），来源声明保留在对应源文件内。
+version: 1.2.0
+astrbot_version: ">=4.25.3"
+author: xiaoxi2760
+repo: https://github.com/liao0050go-stack/astrbot_plugin_denia_share
+support_platforms:
+  - aiocqhttp
+social_link: https://github.com/xiaoxi2760
+tags:
+  - 链接解析
+  - 分享卡片
+
