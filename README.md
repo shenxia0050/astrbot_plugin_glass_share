@@ -1,9 +1,23 @@
 # 希望解析器
 
 > [!NOTE]
-> **个人修改版**：基于 [xiaoxi2760/astrbot_plugin_denia_share](https://github.com/xiaoxi2760/astrbot_plugin_denia_share)（MIT 许可）修改，供个人使用，原作者署名与上游功能保持不变。
-> 本仓库主要改动：新增 `glass` 玻璃卡片布局（浅色粉蓝渐变 + 内嵌圆角封面 + 白色统计面板，全平台生效）；修复长简介溢出简介框；玻璃背景改为三段式渐变并消除光晕裁切硬边；B站音视频合并补上 `-movflags +faststart`（moov 前置，修复部分客户端视频卡片外显竖屏占位 / 时长 00:01）；WebUI 与配置项同步新增对应选项。
-> 许可与致谢见 [LICENSE](LICENSE)、[LICENSES](LICENSES) 及各源文件头部声明。
+> **二次修改版声明**：本项目基于 [xiaoxi2760/astrbot_plugin_denia_share](https://github.com/xiaoxi2760/astrbot_plugin_denia_share) 修改，并保留原项目的版权及 MIT 许可声明。本版本由 `liao0050go-stack` 在上游项目基础上修改和维护，主要新增/修改包括：
+>
+> * 新增 `glass` 玻璃卡片布局（浅色粉蓝渐变 + 内嵌圆角封面 + 白色统计面板，全平台生效）；
+> * 修复长简介溢出简介框；
+> * 玻璃背景改为三段式渐变并消除光晕裁切硬边；
+> * 为 B 站音视频合并增加 `-movflags +faststart`（moov 前置，修复部分客户端视频卡片外显竖屏占位 / 时长 00:01）；
+> * 同步增加 WebUI 与相关配置项。
+>
+> 本项目中部分代码来自其他开源项目，具体版权及许可证如下：
+>
+> * [xiaoxi2760/astrbot_plugin_denia_share](https://github.com/xiaoxi2760/astrbot_plugin_denia_share) — MIT
+> * [iris1598/astrbot_plugin_rika_share](https://github.com/iris1598/astrbot_plugin_rika_share) — MIT
+> * [Johnserf-Seed/f2](https://github.com/Johnserf-Seed/f2) — Apache-2.0
+>
+> 第三方项目的原版权声明、许可证文本及相关归属信息，以仓库中的 [LICENSE](LICENSE)、[LICENSES/](LICENSES) 及对应源文件头部声明为准，汇总见 [LICENSES/THIRD-PARTY-NOTICES.md](LICENSES/THIRD-PARTY-NOTICES.md)。
+>
+> 本项目自身新增或修改的代码，在不影响上述第三方许可证义务的前提下，同样采用 MIT 许可证。
 
 支持多平台链接解析，并自带一个网页界面（WebUI）：把分享链接解析成结构化内容，渲染成分享卡片发出来。
 
