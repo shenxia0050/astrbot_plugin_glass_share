@@ -1,7 +1,9 @@
 # 希望解析器
 
 > [!NOTE]
-> **二次修改版声明**：本项目基于 [xiaoxi2760/astrbot_plugin_denia_share](https://github.com/xiaoxi2760/astrbot_plugin_denia_share) 修改，并保留原项目的版权及 MIT 许可声明。本版本由 `liao0050go-stack` 在上游项目基础上修改和维护，主要新增/修改包括：
+> **二次修改版声明**：本项目基于 [xiaoxi2760/astrbot_plugin_denia_share](https://github.com/xiaoxi2760/astrbot_plugin_denia_share) 修改，并保留原项目的版权及 MIT 许可声明。本版本由 `liao0050go-stack` 在上游项目基础上修改和维护。
+>
+> 为避免与上游项目重名、干扰原插件的搜索与使用，本仓库及插件已更名为 **`astrbot_plugin_glass_share`**（显示名「希望解析器 · Glass」）；上游署名、许可证与致谢保持不变。主要新增/修改包括：
 >
 > * 新增 `glass` 玻璃卡片布局（浅色粉蓝渐变 + 内嵌圆角封面 + 白色统计面板，全平台生效）；
 > * 修复长简介溢出简介框；
