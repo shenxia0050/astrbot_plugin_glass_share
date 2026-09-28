@@ -969,8 +969,8 @@ class ParserConfig:
 
     @property
     def RENDER_LAYOUT(self) -> str:
-        val = str(self._cfg_get("RENDER_LAYOUT", "standard")).strip().lower()
-        return val if val in {"standard", "magazine", "immersive", "feed", "glass"} else "standard"
+        val = str(self._cfg_get("RENDER_LAYOUT", "glass")).strip().lower()
+        return val if val in {"standard", "magazine", "immersive", "feed", "glass"} else "glass"
 
     @property
     def RENDER_WIDTH(self) -> int:

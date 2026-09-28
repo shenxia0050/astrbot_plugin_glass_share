@@ -204,7 +204,7 @@
       "RENDER_LAYOUT": {
         "description": "卡片布局",
         "type": "string",
-        "default": "standard",
+        "default": "glass",
         "invisible": true,
         "hint": "切换后可在「解析」页立刻预览效果；glass 玻璃为固定浅色的玻璃拟态风格（背景可用下方渐变两项覆盖）",
         "options": [
