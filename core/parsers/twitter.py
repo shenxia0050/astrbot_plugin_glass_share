@@ -16,7 +16,7 @@ import json
 import re
 from datetime import timezone
 from typing import Any, ClassVar
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 from astrbot.api import logger
@@ -29,6 +29,35 @@ _TWIMG_HOST_PREFIX = {
     "pbs.twimg.com": "pbs",
     "video.twimg.com": "video",
 }
+
+# 第三方 API（vxtwitter / fxtwitter）**不能**用 COMMON_HEADER 里那个伪造的
+# 浏览器 UA —— Chrome/55 + UBrowser 会被 Cloudflare 判为可疑客户端，
+# 直接返回 403 挑战页（"Just a moment..."）而不是 JSON。
+# 实测：同一个接口用浏览器 UA 稳定 403，用下面这种「明确自称机器人」的 UA
+# 稳定 200。这不是伪装，而是这类反代服务本就期望被程序调用。
+THIRD_PARTY_UA = (
+    "Mozilla/5.0 (compatible; DeniaShare/1.0; "
+    "+https://github.com/xiaoxi2760/astrbot_plugin_denia_share)"
+)
+
+
+def _to_api_host(url: str, api_host: str) -> str:
+    """把 x.com / twitter.com 这类**主机名**换成第三方 API 域名。
+
+    **不能用 url.replace("x.com", ...).replace("twitter.com", ...)**：
+    ``x.com`` 是 ``vxtwitter.com``/``fxtwitter.com`` 的子串，替换出来的
+    ``api.vxtwitter.com`` 会再次命中第二条 replace，得到
+    ``api.vxapi.vxtwitter.com`` 这种不存在的域名 —— 表现为所有 ``x.com``
+    链接必然超时（而 ``twitter.com`` 链接正常，很容易误判成「偶发网络问题」）。
+
+    这里只替换 URL 的主机名部分，不碰路径与查询串。
+    """
+    parts = urlsplit(url)
+    if (parts.netloc or "").lower() not in ("x.com", "www.x.com",
+                                            "twitter.com", "www.twitter.com",
+                                            "mobile.twitter.com", "m.twitter.com"):
+        return url
+    return urlunsplit((parts.scheme or "https", api_host, parts.path, parts.query, parts.fragment))
 
 
 def proxy_media_url(url: str | None) -> str | None:
@@ -110,8 +139,10 @@ class TwitterParser(BaseParser):
     # ------------------------------------------------------------------ #
 
     async def parse_by_vxapi(self, url: str) -> ParseResult:
-        api_url = url.replace("x.com", "api.vxtwitter.com").replace("twitter.com", "api.vxtwitter.com")
-        async with self.new_client(headers=self.headers) as client:
+        api_url = _to_api_host(url, "api.vxtwitter.com")
+        # 必须覆盖 UA，见 THIRD_PARTY_UA 的注释
+        headers = {**self.headers, "User-Agent": THIRD_PARTY_UA}
+        async with self.new_client(headers=headers) as client:
             response = await client.get(api_url)
             response.raise_for_status()
             data = response.json()
@@ -148,8 +179,10 @@ class TwitterParser(BaseParser):
     # ------------------------------------------------------------------ #
 
     async def parse_by_fxapi(self, url: str, tweet_id: str) -> ParseResult:
-        api_url = url.replace("x.com", "api.fxtwitter.com").replace("twitter.com", "api.fxtwitter.com")
-        async with self.new_client(headers=self.headers) as client:
+        api_url = _to_api_host(url, "api.fxtwitter.com")
+        # 同上：fxtwitter 对浏览器 UA 也会 403
+        headers = {**self.headers, "User-Agent": THIRD_PARTY_UA}
+        async with self.new_client(headers=headers) as client:
             response = await client.get(api_url)
             if response.status_code >= 500:
                 raise ParseException(f"fxtwitter 服务异常: {response.status_code}")

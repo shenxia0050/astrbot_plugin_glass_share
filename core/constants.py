@@ -160,3 +160,22 @@ def unregister_platform(key: str) -> None:
         return
     PLATFORMS.pop(name, None)
     PLATFORM_DISPLAY_NAMES.pop(name, None)
+
+
+# ============================ 定向代理 ============================
+#
+# 可选的兜底代理地址，**留空 = 不启用**。设计给「个别域名直连必然不通、
+# 又不想给全部流量挂代理」的场景，例如 Twitter 的媒体 CDN（pbs.twimg.com /
+# video.twimg.com 境内直连必超时）。只对 DOWNLOAD_PROXY_HOSTS 里的域名生效，
+# 其余域名（B站/网易云/QQ音乐等）一律直连，不会绕代理。
+# 部署时在此填入自己的代理地址，例如 "http://172.17.0.1:7890"。
+LOCAL_PROXY_FALLBACK: Final[str] = ""
+
+# 需要走 LOCAL_PROXY_FALLBACK 的域名（媒体下载器用；解析请求另有各解析器自己的处理）
+#
+# pbs.twimg.com / video.twimg.com: X 的媒体 CDN，境内直连必然超时（实测 HTTP 000），
+# 不走代理则推文的封面、图片、视频全部下载失败。
+DOWNLOAD_PROXY_HOSTS: Final[frozenset[str]] = frozenset({
+    "pbs.twimg.com",
+    "video.twimg.com",
+})

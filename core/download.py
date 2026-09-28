@@ -9,12 +9,14 @@ from contextlib import contextmanager
 from urllib.parse import urljoin
 
 import httpx
+from urllib.parse import urlsplit
 import aiofiles
 from astrbot.api import logger
 
 from .media_utils import merge_av, safe_unlink, generate_file_name
 from .media_verify import HEAD_PROBE_BYTES, classify_media_response, sniff_image_ext
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
+from .constants import DOWNLOAD_PROXY_HOSTS, LOCAL_PROXY_FALLBACK
 from .exception import IgnoreException, DownloadException
 
 # 图片并发上限。
@@ -70,8 +72,20 @@ class StreamDownloader:
         self.client: httpx.AsyncClient = self._new_client(self.proxies)
 
     def _new_client(self, proxy: str | None) -> httpx.AsyncClient:
+        # 全局代理（配置项 PROXY）为空时，仍给少数「直连必然不通」的域名挂上
+        # 本地兜底代理。用 mounts 而不是 proxy= 是因为 mounts 只对列出的域名生效，
+        # 其余（国内平台）照旧直连 —— 代理是计费套餐，不能让它们白绕一圈。
+        mounts: dict[str, httpx.AsyncBaseTransport] = {}
+        if not proxy and LOCAL_PROXY_FALLBACK:
+            proxied = httpx.AsyncHTTPTransport(
+                proxy=LOCAL_PROXY_FALLBACK, retries=1, verify=self.verify_ssl,
+            )
+            mounts = {
+                f"https://{host}": proxied for host in DOWNLOAD_PROXY_HOSTS
+            }
         return httpx.AsyncClient(
             timeout=DOWNLOAD_TIMEOUT, verify=self.verify_ssl, proxy=proxy,
+            **({"mounts": mounts} if mounts else {}),
         )
 
     async def aclose(self):
@@ -293,8 +307,19 @@ class StreamDownloader:
             "allow_redirects": True,
             "verify": self.verify_ssl,
         }
-        if self.proxies:
-            session_kwargs["proxies"] = {"http": self.proxies, "https": self.proxies}
+        # 代理判定要和 httpx 那条路径一致：curl_cffi 的 proxies 是**整个 session 级**的，
+        # 没法像 httpx mounts 那样按域名分流。所以只在「配了全局代理」或
+        # 「这个 URL 属于直连不通的域名」时才带上兜底代理，其余照旧直连。
+        effective_proxy = self.proxies
+        if not effective_proxy:
+            try:
+                host = (urlsplit(url).netloc or "").split("@")[-1].split(":")[0].lower()
+            except Exception:
+                host = ""
+            if host in DOWNLOAD_PROXY_HOSTS and LOCAL_PROXY_FALLBACK:
+                effective_proxy = LOCAL_PROXY_FALLBACK
+        if effective_proxy:
+            session_kwargs["proxies"] = {"http": effective_proxy, "https": effective_proxy}
 
         part = self._part_path(file_path)
         limit = self._max_bytes if max_bytes is None else max_bytes
