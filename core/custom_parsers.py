@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import json
+import shutil
 import sys
 from dataclasses import dataclass, field
 from importlib.util import module_from_spec, spec_from_file_location
@@ -69,6 +71,14 @@ TEMPLATE_NAME = "TEMPLATE.py.txt"
 # 插件的 README 只在「自定义解析器」一节里指路，把细节留在离使用现场最近的地方。
 GUIDE_NAME = "README.md"
 GUIDE_SOURCE = Path(__file__).with_name("custom_parsers_guide.md")
+
+# 随仓库附带的参考解析器（源码树里的 ``custom_parsers/``：网易云 / QQ音乐 / 小黑盒）。
+# 首次运行（或 SEED_VERSION 提升后）自动播种进数据目录，让新装用户开箱即得；
+# **只补缺、不覆盖** —— 用户改过或删过的文件永远以数据目录为准。随插件更新了
+# 某个参考解析器的内容时，把 SEED_VERSION +1，新版本才会重新铺入。
+BUNDLED_DIR = Path(__file__).resolve().parent.parent / "custom_parsers"
+BUNDLED_SEED_VERSION = 1
+SEED_MARKER = ".bundled_seed.json"
 
 _TEMPLATE = '''"""自定义解析器模板 —— 复制本文件为 ``my_site.py``（去掉 .txt）即可被加载。
 
@@ -191,6 +201,7 @@ class CustomParserLoader:
         guide = self.directory / GUIDE_NAME
         if not guide.exists():
             self._copy_guide(guide)
+        self._seed_bundled()
 
     def _copy_guide(self, target: Path) -> None:
         """把仓库里的说明文档复制进数据目录。
@@ -211,6 +222,55 @@ class CustomParserLoader:
             logger.warning(
                 f"[denia_share] 无法写入自定义解析器说明 {target}", exc_info=True
             )
+
+    def _seed_bundled(self) -> None:
+        """把随仓库附带的参考解析器播种进数据目录（只补缺，不覆盖）。
+
+        网易云 / QQ音乐 / 小黑盒三个解析器随仓库分发在源码树的 ``custom_parsers/``，
+        但加载器只认**数据目录**——不播种的话每个新装用户都得手动复制一遍。
+        播种完成后写一个版本标记：之后用户删掉某个解析器不会被重新铺回来，
+        直到随插件更新把 SEED_VERSION 提升。任何失败都不致命，只记警告。
+        """
+        try:
+            marker = self.directory / SEED_MARKER
+            seen: dict[str, Any] = {}
+            if marker.exists():
+                try:
+                    seen = json.loads(marker.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    seen = {}
+            if seen.get("version") == BUNDLED_SEED_VERSION:
+                return
+            if not BUNDLED_DIR.is_dir():
+                return
+            seeded: list[str] = []
+            for source in sorted(BUNDLED_DIR.glob("*.py")):
+                target = self.directory / source.name
+                if target.exists():
+                    continue  # 用户已有的（或改过的）永远不动
+                try:
+                    shutil.copy2(source, target)
+                    seeded.append(source.stem)
+                except OSError:
+                    logger.warning(
+                        f"[denia_share] 无法播种自定义解析器 {source.name}", exc_info=True
+                    )
+            try:
+                marker.write_text(
+                    json.dumps(
+                        {"version": BUNDLED_SEED_VERSION, "seeded": seeded},
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+            except OSError:
+                logger.warning("[denia_share] 无法写入解析器播种标记", exc_info=True)
+            if seeded:
+                logger.info(
+                    f"[denia_share] 已放入随仓库附带的解析器：{', '.join(seeded)}"
+                )
+        except Exception:
+            logger.warning("[denia_share] 自定义解析器播种失败，跳过", exc_info=True)
 
     # ---------- 加载 ----------
 
