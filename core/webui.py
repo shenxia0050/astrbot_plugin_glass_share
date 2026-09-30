@@ -47,7 +47,10 @@ def _astrbot_callback_base() -> str:
     except Exception:
         return ""
 
-PLUGIN_NAME = "astrbot_plugin_denia_share"
+# WebAPI 路由前缀必须与实际插件名一致。AstrBot 的插件页面 bridge 会用它自己
+# 记录的插件名（metadata.name，即本插件目录名）去拼 ``/plugins/extensions/<name>/...``，
+# 再由后端匹配注册的 ``/<PLUGIN_NAME><suffix>``；写死成 denia 会让 glass 页面全部 404。
+PLUGIN_NAME = Path(__file__).resolve().parent.parent.name
 
 # 缩略图/预览图的最大宽度与体积上限。
 # 预览图要经 postMessage 传进 iframe，几 MB 的 base64 会明显卡顿，所以宁可不给。

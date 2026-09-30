@@ -66,7 +66,11 @@ from .core.custom_parsers import (
     LoadResult as CustomParserLoadResult,
 )
 
-PLUGIN_NAME = "astrbot_plugin_denia_share"
+# 插件名 = 本文件所在目录名（AstrBot 以插件目录名 / metadata.name 标识插件）。
+# 这里绝不能写死 "astrbot_plugin_denia_share"：本仓库是 glass 融合版，写死会让
+# glass 复用 denia 的数据目录（缓存 / 历史 / B站 Cookie 全部串台），
+# 还会去扫描 denia 的 custom_parsers，导致自定义解析器加载失败。
+PLUGIN_NAME = Path(__file__).resolve().parent.name
 
 # ========== B站扫码登录 API ==========
 BILI_QR_GENERATE_URL = "https://passport.bilibili.com/x/passport-login/web/qrcode/generate"

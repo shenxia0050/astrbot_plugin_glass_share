@@ -43,16 +43,43 @@ from astrbot.api import logger
 
 # ---- 导入插件自身的模块 ----
 # 不能写 `from astrbot_plugin_denia_share.core...`（模板里的写法）：插件在这个
-# 部署下被 AstrBot 挂成 `data.plugins.astrbot_plugin_denia_share`，顶层名不存在。
-# 也不能用相对导入：自定义解析器是 spec_from_file_location 建出来的顶层模块，
-# __package__ 为空。这里从 sys.modules 里按后缀反查，插件被挂成什么名字都能找到。
+# 部署下被 AstrBot 挂成 `data.plugins.<插件名>`，顶层名不存在。也不能用相对导入：
+# 自定义解析器是 spec_from_file_location 建出来的顶层模块，__package__ 为空。
+# 下面按「本文件所在的数据目录名」反查对应插件包，denia / glass 谁加载都能对上。
 def _plugin_module():
+    """反查本文件所属的插件模块。
+
+    自定义解析器固定放在 ``<插件数据目录>/custom_parsers/`` 下，而数据目录名
+    就是插件名（``astrbot_plugin_denia_share`` / ``astrbot_plugin_glass_share``），
+    据此取出「本文件属于哪个插件」，再按名字去 ``sys.modules`` 里取对应包。
+
+    不能只按两个后缀遍历 sys.modules：denia 与 glass 可能在同一进程里同时加载，
+    dict 顺序取到的可能是另一个插件的包，那样 BaseParser 就不是加载器用来校验的
+    那一个，会被误判成「文件里没有 BaseParser 的子类」。
+    """
     import sys
-    for name, mod in sys.modules.items():
-        if name.endswith(("astrbot_plugin_denia_share",
-                         "astrbot_plugin_glass_share")) and hasattr(mod, "__path__"):
-            return mod
-    raise ImportError("找不到 astrbot_plugin_denia_share 模块（插件未加载？）")
+    from pathlib import Path
+
+    candidates = []
+    try:
+        # .../plugin_data/<plugin_name>/custom_parsers/<file>.py
+        candidates.append(Path(__file__).resolve().parent.parent.name)
+    except NameError:  # pragma: no cover - spec 加载时一定有 __file__
+        pass
+    for fallback in ("astrbot_plugin_glass_share", "astrbot_plugin_denia_share"):
+        if fallback not in candidates:
+            candidates.append(fallback)
+
+    for candidate in candidates:
+        for name, mod in sys.modules.items():
+            if (
+                name == candidate
+                or name.endswith("." + candidate)
+            ) and hasattr(mod, "__path__"):
+                return mod
+    raise ImportError(
+        f"找不到插件模块（候选：{', '.join(candidates)}；插件未加载？）"
+    )
 
 
 _plugin = _plugin_module()
