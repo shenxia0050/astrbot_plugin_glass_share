@@ -201,6 +201,27 @@
           "浅色"
         ]
       },
+      "RENDER_THEME_AUTO": {
+        "description": "按时间自动切换主题",
+        "type": "bool",
+        "default": false,
+        "invisible": true,
+        "hint": "开启后忽略上面的「卡片主题」，按下面时段自动选深浅色（白天浅色、夜间深色）"
+      },
+      "RENDER_THEME_DAY_RANGE": {
+        "description": "白天时段",
+        "type": "string",
+        "default": "07:00-19:00",
+        "invisible": true,
+        "hint": "格式 HH:MM-HH:MM；此区间内浅色、其余深色。可跨零点，如 22:00-06:00"
+      },
+      "RENDER_THEME_TZ_OFFSET": {
+        "description": "时区偏移（小时）",
+        "type": "int",
+        "default": 8,
+        "invisible": true,
+        "hint": "判断白天/夜间用的时区，默认 8（东八区）。容器内 TZ 正确时无需改"
+      },
       "RENDER_LAYOUT": {
         "description": "卡片布局",
         "type": "string",

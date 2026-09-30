@@ -1014,3 +1014,12 @@ textarea.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--
 
 
 
+
+/* 被上层开关接管的控件：置灰并屏蔽点击。
+   用于「按时间自动切换主题」开启后的静态「卡片主题」——那项此时已不生效，
+   留着可点会让人以为改了有用。 */
+.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  filter: grayscale(0.6);
+}

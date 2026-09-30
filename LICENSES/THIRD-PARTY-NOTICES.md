@@ -26,3 +26,11 @@
   （原文件头含 `@Author: JohnserfSeed`、`@License: Apache License 2.0` 等归属信息）移植，
   **已修改**：移除 gmssl 依赖、内嵌纯 Python 的 SM3 实现、仅保留 `generate_abogus()`
   对外入口（改动说明见该文件头）。
+
+## 4. astrbot_plugin_multi_parser（小黑盒签名算法参考）
+
+- 仓库：<https://github.com/Qfxaile/astrbot_plugin_multi_parser>
+- 许可证：MIT
+- 涉及文件：`custom_parsers/xiaoheihe.py` —— hkey 签名算法与其
+  `platforms/xiaoheihe/signing.py` 一致（算法还原自小黑盒前端，
+  纯算法实现，无内嵌密钥）。

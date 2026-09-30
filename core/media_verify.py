@@ -26,6 +26,7 @@
 """
 
 from __future__ import annotations
+import unicodedata
 
 # 只取开头这一段做判断。错误页（HTML / JSON）一定从头开始，
 # 而合法媒体不会是「前 1KB 是 HTML、后面才是视频」。
@@ -143,3 +144,54 @@ def sniff_image_ext(head: bytes) -> str | None:
     if head[4:8] == b"ftyp":
         return _FTYP_BRANDS.get(head[8:12])
     return None
+
+
+# 数学字母数字区（Unicode Mathematical Alphanumeric Symbols，U+1D400–U+1D7FF）。
+# B站/YouTube 的标题里常见 UP 主用这类「花体」写 𝟖𝐊 / 𝐇𝐃𝐑 / 𝟏𝟐𝟎𝐅𝐏𝐒。
+_NARROW_MATH_RANGES = (
+    (0x1D400, 0x1D7FF),
+)
+# 同一族的「历史遗留」字符：数学字母数字区之外，但 NFKD 同样能还原成 ASCII，
+# 例如 ℂ(U+2102)→C、ℋ(U+210B)→H、ℓ(U+2113)→l、ℎ(U+210E)→h。
+# 单独列出而不是拿整个 U+2100–U+214F：那个区里还有 ℉ ℅ № 之类**不该被拆**的符号。
+_NFKD_ASCII_EXTRA = frozenset("ℂℍℋℌℐℑℒℓℕℙℚℝℛℜℤℨℎℬℰℱℳℴℊℯ")
+
+
+def normalize_math_alphanumerics(text: str | None) -> str:
+    """把数学字母数字（花体/粗体/哥特体等）还原为普通 ASCII 字符。
+
+    ``𝟖𝐊`` → ``8K``，``𝓐`` → ``A``，``ℂ`` → ``C``。
+
+    **为什么需要**：卡片渲染用的 Noto Sans CJK 不覆盖 U+1D400–U+1D7FF，
+    这些字符会被逐字画成「豆腐块」方框（B站标题里很常见，因为 UP 主喜欢用
+    花体写 𝟖𝐊/𝐇𝐃𝐑）。还原成普通字母后既能正常显示，中文语境下也更易读。
+
+    **为什么用 NFKD 而不是手写映射表**：Unicode 对这些字符定义了兼容分解，
+    标准库直接给出答案，且天然覆盖那 74 个「历史遗留」缺口（𝐀 与 ℂ 这类
+    同族字符分散在不同区段）。手写表既长又会漏。
+
+    **为什么必须限定区段**：裸用 NFKD 会连中文一起改 ——
+    ``U+F900–U+FAD9`` 兼容汉字、``U+2F00–U+2FD5`` 康熙部首、
+    ``U+FF01–U+FFBE`` 全角标点、``U+2460`` 带圈数字都会被拆。
+    所以只在数学字母数字区、以及显式列出的同族字符上做转换。
+    """
+    if not text:
+        return ""
+    out: list[str] = []
+    normalized_cache: dict[str, str] = {}
+    for ch in text:
+        cp = ord(ch)
+        in_scope = any(lo <= cp <= hi for lo, hi in _NARROW_MATH_RANGES) or ch in _NFKD_ASCII_EXTRA
+        if not in_scope:
+            out.append(ch)
+            continue
+        mapped = normalized_cache.get(ch)
+        if mapped is None:
+            decomposed = unicodedata.normalize("NFKD", ch)
+            # 只接受「还原成单个 ASCII 可打印字符」的结果：希腊字母变体
+            # （𝚨→Α）分解后依然不是 ASCII，保持原样交给字体处理。
+            mapped = decomposed if (len(decomposed) == 1 and decomposed.isascii()
+                                    and decomposed.isprintable()) else ch
+            normalized_cache[ch] = mapped
+        out.append(mapped)
+    return "".join(out)

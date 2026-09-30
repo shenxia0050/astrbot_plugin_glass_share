@@ -22,6 +22,9 @@ import {
 
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
+/** 白天时段：HH:MM-HH:MM（容忍不补零），与后端 _parse_hhmm 的校验保持一致。 */
+const DAY_RANGE_RE = /^\s*([01]?\d|2[0-3]):([0-5]?\d)\s*-\s*([01]?\d|2[0-3]):([0-5]?\d)\s*$/;
+
 const CARD_THEMES = [
   { value: "dark", label: "深色" },
   { value: "light", label: "浅色" },
@@ -38,6 +41,9 @@ const CARD_LAYOUTS = [
 /** 卡片配置键 → 预览接口的外观参数名。 */
 const OVERRIDE_MAP = {
   RENDER_THEME: "theme",
+  RENDER_THEME_AUTO: "theme_auto",
+  RENDER_THEME_DAY_RANGE: "theme_day_range",
+  RENDER_THEME_TZ_OFFSET: "theme_tz_offset",
   RENDER_LAYOUT: "layout",
   RENDER_WIDTH: "width",
   RENDER_ACCENT_COLOR: "accent_color",
@@ -355,6 +361,8 @@ export function createAppearanceView(ctx) {
   }
 
   function renderCardDesigner() {
+    // 自动切换是否开启（取「预览草稿 → 已保存配置」的当前值）
+    const autoThemeOn = Boolean(cardValue("RENDER_THEME_AUTO"));
     const themeSeg = seg(CARD_THEMES, cardValue("RENDER_THEME"), (v) => {
       setCard("RENDER_THEME", v);
       render();
@@ -381,9 +389,55 @@ export function createAppearanceView(ctx) {
     return card("卡片设计器", "改的是真正发出去的分享卡片，保存后立即生效", [
       switchField("卡片渲染", "RENDER_ENABLED", "渲染卡片", "纯文本", "关闭后解析结果以纯文本发送，不再生成图片"),
       h("div", { class: "field" }, [
-        h("div", { class: "field-label", text: "卡片主题" }),
-        themeSeg,
+        h("div", { class: "field-label" }, [
+          "卡片主题",
+          autoThemeOn ? h("span", { class: "unit", text: "（已由下方自动切换接管）" }) : null,
+        ]),
+        // 自动切换开启时把静态主题置灰：它已经不生效了，留着可点会误导
+        h("div", { class: autoThemeOn ? "is-disabled" : "" }, [themeSeg]),
       ]),
+      switchField(
+        "按时间自动切换主题",
+        "RENDER_THEME_AUTO",
+        "开启",
+        "关闭",
+        "开启后忽略「卡片主题」，白天浅色、夜间深色",
+      ),
+      autoThemeOn
+        ? h("div", {}, [
+            h("div", { class: "field" }, [
+              h("div", { class: "field-label", text: "白天时段" }),
+              h("div", { class: "field-body" }, [
+                (() => {
+                  const input = h("input", {
+                    class: "input",
+                    type: "text",
+                    placeholder: "07:00-19:00",
+                    value: String(cardValue("RENDER_THEME_DAY_RANGE") ?? "07:00-19:00"),
+                    spellcheck: "false",
+                    onChange: (event) => {
+                      const text = event.target.value.trim();
+                      if (!DAY_RANGE_RE.test(text)) {
+                        toast("白天时段：需要 HH:MM-HH:MM 格式，可跨零点如 22:00-06:00", "err");
+                        event.target.value = String(cardValue("RENDER_THEME_DAY_RANGE") ?? "07:00-19:00");
+                        return;
+                      }
+                      setCard("RENDER_THEME_DAY_RANGE", text);
+                    },
+                  });
+                  return input;
+                })(),
+              ]),
+              h("p", { class: "field-hint", text: "区间内浅色、其余深色；支持跨零点，如 22:00-06:00" }),
+            ]),
+            numField("时区偏移", "RENDER_THEME_TZ_OFFSET", {
+              min: -12,
+              max: 14,
+              unit: "小时（默认 8=东八区）",
+              hint: "判断白天/夜间用的时区；容器 TZ 正确时无需改",
+            }),
+          ])
+        : null,
       h("div", { class: "field" }, [
         h("div", { class: "field-label", text: "卡片布局" }),
         layoutSeg,

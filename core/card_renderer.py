@@ -41,6 +41,7 @@ from typing import Any
 from astrbot.api import logger
 
 from .data import ParseResult, ImageContent
+from .media_verify import normalize_math_alphanumerics
 from .task import PathTask
 
 try:
@@ -110,11 +111,17 @@ _STAT_LABELS = {
 
 
 def strip_emoji(text: str | None) -> str:
-    """移除字符串中的 emoji，避免字体缺失导致渲染成方块。"""
+    """移除字符串中的 emoji，避免字体缺失导致渲染成方块。
+
+    顺带把数学字母数字（花体）还原成普通 ASCII —— 同样是「字体缺字形会变成
+    豆腐块」的问题，见 ``normalize_math_alphanumerics``。放在这里是因为
+    所有要上卡片的文本都会过这个函数，一处收口。
+    """
     if not text:
         return ""
     cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
     cleaned = _EMOJI_RE.sub("", cleaned)
+    cleaned = normalize_math_alphanumerics(cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     return cleaned.strip()
 
@@ -333,6 +340,17 @@ class _Theme:
         border_alpha: int,
         placeholder_top: tuple[int, int, int],
         placeholder_bottom: tuple[int, int, int],
+        # --- 以下 4 项只有 glass 布局用 ---
+        # 玻璃面板/播放键的底色。glass 布局原来是写死的白色，只有浅色主题能用；
+        # 参数化后深色主题才能把面板压暗（见 _glass_theme）。
+        glass_panel: str = "#FFFFFF",
+        glass_panel_alpha: int = 214,
+        glass_play: str = "#FFFFFF",
+        glass_play_alpha: int = 245,
+        # 面板的投影色。浅色卡片用紫灰投影显脏，原来写死 (72,62,92)；
+        # 深色主题要改成纯黑更自然。
+        glass_panel_shadow: tuple[int, int, int] = (72, 62, 92),
+        glass_panel_shadow_alpha: int = 55,
     ):
         self.gradient_top = _hex_to_rgb(gradient_top)
         self.gradient_bottom = _hex_to_rgb(gradient_bottom)
@@ -351,6 +369,12 @@ class _Theme:
         self.border_alpha = border_alpha
         self.placeholder_top = placeholder_top
         self.placeholder_bottom = placeholder_bottom
+        self.glass_panel = _hex_to_rgb(glass_panel)
+        self.glass_panel_alpha = glass_panel_alpha
+        self.glass_play = _hex_to_rgb(glass_play)
+        self.glass_play_alpha = glass_play_alpha
+        self.glass_panel_shadow = glass_panel_shadow
+        self.glass_panel_shadow_alpha = glass_panel_shadow_alpha
 
 
 _THEMES = {
@@ -502,11 +526,16 @@ class ShareCardRenderer:
         show_play_button: bool = True,
         gradient_top: str | None = None,
         gradient_bottom: str | None = None,
+        theme_resolver: "Any" = None,
     ):
         self.cache_dir = cache_dir
         self.enabled = enabled and Image is not None
         self.width = max(520, min(1080, int(width)))
-        self.theme_name = theme if theme in _THEMES else "dark"
+        self._theme_name = theme if theme in _THEMES else "dark"
+        # 「按时间自动切换主题」用：每次渲染时回调取当前该用的主题。
+        # 传回调而不是构造时算一次 —— 渲染器是常驻对象，构造时算的话跨过
+        # 白天/夜间分界点后会一直停在旧主题，直到改配置或重启插件。
+        self._theme_resolver = theme_resolver
         self.layout_name = layout if layout in LAYOUT_NAMES else "standard"
         self.font_path = font_path
         self.cover_full_size = cover_full_size
@@ -531,6 +560,32 @@ class ShareCardRenderer:
 
     # ---------- 主题与外观覆盖 ---------- #
 
+    @property
+    def theme_name(self) -> str:
+        """本次渲染实际使用的主题。
+
+        有 theme_resolver 时以它为准（返回值非法则回退静态主题），于是深浅色
+        切换**不需要重建渲染器、也不需要重启插件** —— 渲染器是常驻的，
+        而主题要跟着时间走。
+        """
+        if self._theme_resolver is not None:
+            try:
+                resolved = str(self._theme_resolver()).strip().lower()
+            except Exception:
+                logger.warning("主题解析回调失败，回退到静态主题", exc_info=True)
+            else:
+                if resolved in _THEMES:
+                    return resolved
+        return self._theme_name
+
+    @theme_name.setter
+    def theme_name(self, value: str) -> None:
+        """预览等场景直接指定主题（等价于覆盖静态主题）。"""
+        self._theme_name = value if value in _THEMES else "dark"
+
+    # 注意：_theme 是**方法**（各处按 self._theme() 调用）。
+    # 编译期把它当属性会得到 `'_Theme' object is not callable` —— 加动态
+    # theme_name 时曾误加 @property，四个非 glass 布局立刻全挂。
     def _theme(self) -> "_Theme":
         """当前主题；配置了自定义背景渐变时返回覆盖了渐变色的副本。"""
         base = _THEMES[self.theme_name]
@@ -2445,13 +2500,44 @@ class ShareCardRenderer:
     }
 
     def _glass_theme(self) -> "_Theme":
-        """glass 布局固定用浅色主题 + 粉蓝渐变；渐变覆盖项仍可自定义背景。"""
+        """glass 布局的主题 —— 跟随配置的深浅色。
+
+        浅色 = 原来的粉蓝渐变；深色 = 深蓝紫冷调渐变。
+        两者都允许 gradient_top / gradient_bottom 覆盖背景。
+
+        **深色必须单独构造一套 glass 字段**：_THEMES["dark"] 是给非 glass 布局
+        写的（面板色/投影色按深底浅字算），直接拿来用会在深色卡片上留一块写死的
+        白面板 —— 那正是 glass 原先"只有浅色"的原因。
+        """
         import copy
+
+        if self.theme_name == "dark":
+            theme = copy.copy(_THEMES["dark"])
+            theme.gradient_top = _hex_to_rgb(self.gradient_top or "#1B2133")
+            theme.gradient_bottom = _hex_to_rgb(self.gradient_bottom or "#2A2438")
+            # 玻璃面板：半透明深紫，alpha 留低让背景渐变透出来，才有"玻璃"感
+            theme.glass_panel = (26, 30, 45)
+            theme.glass_panel_alpha = 150
+            theme.glass_play = (18, 21, 32)
+            theme.glass_play_alpha = 190
+            theme.glass_panel_shadow = (0, 0, 0)
+            theme.glass_panel_shadow_alpha = 90
+            theme.shadow_alpha = 150   # 深色底需要更重投影才有浮起感
+            theme.border_alpha = 34    # 深色下边框要亮一点才看得出玻璃边缘
+            theme.frost_alpha = 18
+            theme.frost_border_alpha = 34
+            return theme
 
         theme = copy.copy(_THEMES["light"])
         theme.gradient_top = _hex_to_rgb(self.gradient_top or "#D8EAF8")
         theme.gradient_bottom = _hex_to_rgb(self.gradient_bottom or "#F8E0EE")
         theme.shadow_alpha = 40  # 浅色卡片配重投影会显脏，玻璃布局收轻一点
+        theme.glass_panel = (255, 255, 255)
+        theme.glass_panel_alpha = 214
+        theme.glass_play = (255, 255, 255)
+        theme.glass_play_alpha = 245
+        theme.glass_panel_shadow = (72, 62, 92)
+        theme.glass_panel_shadow_alpha = 55
         return theme
 
     @staticmethod
@@ -2643,7 +2729,9 @@ class ShareCardRenderer:
             radius=_L.RADIUS + 2, fill=(0, 0, 0, theme.shadow_alpha),
         )
         canvas.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(_L.SHADOW_BLUR)))
-        if self.gradient_top or self.gradient_bottom:
+        if self.gradient_top or self.gradient_bottom or self.theme_name == "dark":
+            # 深色主题也用两色线性渐变：_glass_gradient 那套是专为浅色调的
+            # 三段粉蓝（含"白带"过渡处理），套到深色上会变成灰蓝发脏。
             grad = self._gradient(
                 (self.width, card_h), theme.gradient_top, theme.gradient_bottom
             )
@@ -2698,7 +2786,7 @@ class ShareCardRenderer:
                 sh = Image.new("RGBA", (cover_w + 48, cover_h + 48), (0, 0, 0, 0))
                 ImageDraw.Draw(sh).rounded_rectangle(
                     (24, 28, cover_w + 24, cover_h + 24), radius=_L.GLASS_COVER_RADIUS,
-                    fill=(72, 62, 92, 70),
+                    fill=(*theme.glass_panel_shadow, theme.glass_panel_shadow_alpha + 15),
                 )
                 canvas.alpha_composite(
                     sh.filter(ImageFilter.GaussianBlur(14)), (cx0 - 24, y - 24)
@@ -2714,10 +2802,10 @@ class ShareCardRenderer:
                 r_ = _L.PLAY_R
                 cxx, cyy = cx0 + cover_w // 2, y + cover_h // 2
                 self._glass(canvas, (cxx - r_, cyy - r_, cxx + r_, cyy + r_), r_,
-                            (255, 255, 255), 34, (255, 255, 255), 110, blur=8)
+                            theme.glass_play, 34, theme.glass_play, 110, blur=8)
                 ImageDraw.Draw(canvas).polygon(
                     [(cxx - 12, cyy - 18), (cxx - 12, cyy + 18), (cxx + 20, cyy)],
-                    fill=(255, 255, 255, 245),
+                    fill=(*theme.glass_play, theme.glass_play_alpha),
                 )
             y += cover_h + 26
             draw = ImageDraw.Draw(canvas)
@@ -2777,7 +2865,7 @@ class ShareCardRenderer:
             psh = Image.new("RGBA", (inner_w + 48, panel_h + 48), (0, 0, 0, 0))
             ImageDraw.Draw(psh).rounded_rectangle(
                 (24, 28, inner_w + 24, panel_h + 24), radius=_L.GLASS_PANEL_RADIUS,
-                fill=(72, 62, 92, 55),
+                fill=(*theme.glass_panel_shadow, theme.glass_panel_shadow_alpha),
             )
             canvas.alpha_composite(
                 psh.filter(ImageFilter.GaussianBlur(12)), (pad - 24, y - 24)
@@ -2785,7 +2873,8 @@ class ShareCardRenderer:
             panel = Image.new("RGBA", (inner_w, panel_h), (0, 0, 0, 0))
             ImageDraw.Draw(panel).rounded_rectangle(
                 (0, 0, inner_w - 1, panel_h - 1), radius=_L.GLASS_PANEL_RADIUS,
-                fill=(255, 255, 255, 214), outline=(*theme.border, 24), width=1,
+                fill=(*theme.glass_panel, theme.glass_panel_alpha),
+                outline=(*theme.border, theme.border_alpha + 10), width=1,
             )
             canvas.alpha_composite(panel, (pad, y))
             draw = ImageDraw.Draw(canvas)
@@ -2825,8 +2914,8 @@ class ShareCardRenderer:
             desc_h = len(desc_lines) * _L.F_DESC_LINE_H + 26
             self._glass(
                 canvas, (pad, y, pad + inner_w, y + desc_h), 16,
-                tint_rgb=(255, 255, 255), tint_alpha=160,
-                border_rgb=(255, 255, 255), border_alpha=130, blur=8,
+                tint_rgb=theme.glass_panel, tint_alpha=theme.glass_panel_alpha - 54,
+                border_rgb=theme.glass_panel, border_alpha=theme.glass_panel_alpha - 84, blur=8,
             )
             bar = Image.new("RGBA", (5, desc_h - 20), (0, 0, 0, 0))
             ImageDraw.Draw(bar).rounded_rectangle(

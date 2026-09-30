@@ -15,7 +15,8 @@ from collections.abc import Iterator, Awaitable
 
 from .task import PathTask
 from .constants import PlatformEnum, platform_meta
-from .exception import IgnoreException
+from .exception import IgnoreException, MediaTooLargeException
+from .media_verify import normalize_math_alphanumerics
 
 
 @dataclass(repr=False, slots=True)
@@ -108,6 +109,21 @@ class ParseResult:
     extra: dict[str, Any] = field(default_factory=dict)
     repost: ParseResult | None = None
     render_image: Path | None = None
+
+    def __post_init__(self) -> None:
+        """构造时统一规范化文本。
+
+        放在这里而不是各解析器里，是因为「数学字母数字会渲染成豆腐块」是
+        **所有平台**共有的问题（任意 UP 主的标题都可能带花体），散着改一定会漏。
+        聊天消息、解析记录、卡片三条消费路径读的都是同一个 ParseResult，
+        这里改一次三处都受益。
+        """
+        if self.title:
+            self.title = normalize_math_alphanumerics(self.title)
+        if self.text:
+            self.text = normalize_math_alphanumerics(self.text)
+        if self.author is not None and self.author.name:
+            self.author.name = normalize_math_alphanumerics(self.author.name)
 
     @property
     def header(self) -> str | None:
@@ -217,6 +233,10 @@ class ParseResult:
     # 有了它才能做到「重复审计不叠加」——见 audit_missing_media。
     _AUDIT_WARNING_KEY: ClassVar[str] = "_missing_media_warning"
 
+    # 体积超限那条单独存一份：它与「下载失败」是两类信息，可能同时出现
+    # （一条图集里既有下载失败的图、又有超大的图），共用一个 key 会互相踩。
+    _SIZE_WARNING_KEY: ClassVar[str] = "_oversize_media_warning"
+
     def _iter_media_tasks(self) -> Iterator[tuple[str, PathTask]]:
         """遍历所有需要落盘的媒体任务，附带用途标签（供缺料审计用）。
 
@@ -270,13 +290,18 @@ class ParseResult:
         tasks = list(self._iter_media_tasks())
         warnings = self.extra.setdefault("limit_warnings", [])
 
-        # 撤回上一次审计留下的那条（只撤回自己写的，别误删别的来源）
-        previous = self.extra.pop(self._AUDIT_WARNING_KEY, None)
-        if previous is not None:
-            try:
-                warnings.remove(previous)
-            except ValueError:
-                pass  # 被外部清理过，忽略
+        # 撤回上一次审计留下的那两条（只撤回自己写的，别误删别的来源）。
+        # 缺料那条是单个字符串，体积超限那条是 list（可能有多个）。
+        for key in (self._AUDIT_WARNING_KEY, self._SIZE_WARNING_KEY):
+            previous = self.extra.pop(key, None)
+            if previous is None:
+                continue
+            stale = previous if isinstance(previous, list) else [previous]
+            for item in stale:
+                try:
+                    warnings.remove(item)
+                except ValueError:
+                    pass  # 被外部清理过，忽略
 
         if not tasks:
             return {}
@@ -287,9 +312,19 @@ class ParseResult:
         )
 
         missing: dict[str, int] = {}
+        # 体积超限：按 (用途, 消息) 收集。同一用途可能有多个，也要各自如实列出
+        oversize: list[tuple[str, str]] = []
         for (kind, task), result in zip(tasks, results):
+            if isinstance(result, MediaTooLargeException):
+                # 体积超限是「本来就不该下」，与真正的下载失败要分开说：
+                # 前者用户能自行判断（换清晰度/调上限），后者才是该重试的。
+                # 异常自带的 message 已经带具体数值（如「媒体大小(120.3MB)超过上限(100MB)」），
+                # 直接沿用，不在这里重新拼一遍数字。
+                oversize.append((kind, str(result)))
+                continue
             if isinstance(result, IgnoreException):
-                # 按策略跳过（超时长 / 超体积 / 空响应 / 分片超限），已有专门提示
+                # 其余按策略跳过（超时长 / 空响应 / 分片超限 / 非全年龄），
+                # 它们各自已有专门且准确的提示，不在这里重复。
                 continue
             # get() 失败时不会缓存 _path，所以 resolved 为 None 就等于「没落盘」
             if task.resolved is None:
@@ -304,6 +339,22 @@ class ParseResult:
             warnings.append(message)
             # 记下原文，供下一次调用撤回（幂等的关键）
             self.extra[self._AUDIT_WARNING_KEY] = message
+
+        if oversize:
+            # 每个超限**各占一条**，而不是拼成多行的一条：渲染器是「一条一个
+            # 警告框」，拼起来会让多个限制挤进同一个框，和「时长超限」那种
+            # 一条一框的表现不一致。
+            #
+            # 措辞与时长超限保持同一句式（…，不会下载视频），让用户看出
+            # 这两类是同一套限制机制。
+            size_warnings = [
+                f"⚠️ {kind}{msg.removeprefix('媒体')}，不会下载{kind}"
+                for kind, msg in oversize
+            ]
+            warnings.extend(size_warnings)
+            # 存 list 供下次撤回（幂等）：_SIZE_WARNING_KEY 对应的是**一批**
+            self.extra[self._SIZE_WARNING_KEY] = size_warnings
+
         return missing
 
     @property

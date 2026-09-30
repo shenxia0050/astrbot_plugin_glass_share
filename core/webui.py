@@ -634,7 +634,11 @@ class WebUIApi:
         opts = pconfig.renderer_options()
         opts["enabled"] = True
 
-        theme = str(overrides.get("theme") or opts["theme"]).strip().lower()
+        # 主题基准：开启「按时间自动切换」时用当前时刻该用的那个（而不是配置里
+        # 那个静态值，它在自动模式下已被忽略）。用户显式覆盖 theme 时仍以覆盖为准
+        # —— 预览页手动选浅色就是想看浅色，不该被时间顶掉。
+        base_theme = pconfig.resolved_theme() if pconfig.RENDER_THEME_AUTO else opts["theme"]
+        theme = str(overrides.get("theme") or base_theme).strip().lower()
         layout = str(overrides.get("layout") or opts["layout"]).strip().lower()
         if theme not in {"dark", "light"}:
             raise PreviewOverridesError(f"主题只能是 dark 或 light，收到 {theme!r}")
@@ -715,7 +719,9 @@ class WebUIApi:
             # 没有覆盖项时直接用常驻渲染器；没开渲染时也要能给预览（强制启用）
             renderer = self.plugin._renderer
             if renderer is None or not renderer.enabled:
-                opts = get_config().renderer_options()
+                # 这条分支没有用户覆盖项，直接交给带自动主题的装配，
+                # 预览才能反映「当前时刻真正会发出去的那张卡」
+                opts = get_config().renderer_options_with_auto_theme()
                 opts["enabled"] = True
                 renderer = ShareCardRenderer(self.plugin.cache_dir, **opts)
 

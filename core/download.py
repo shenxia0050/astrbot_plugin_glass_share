@@ -17,7 +17,7 @@ from .media_utils import merge_av, safe_unlink, generate_file_name
 from .media_verify import HEAD_PROBE_BYTES, classify_media_response, sniff_image_ext
 from .constants import COMMON_HEADER, DOWNLOAD_TIMEOUT
 from .constants import DOWNLOAD_PROXY_HOSTS, LOCAL_PROXY_FALLBACK
-from .exception import IgnoreException, DownloadException
+from .exception import IgnoreException, DownloadException, MediaTooLargeException
 
 # 图片并发上限。
 #
@@ -172,7 +172,7 @@ class StreamDownloader:
             logger.warning(
                 f"媒体大小 {size_mb:.1f}MB 超过上限 {limit_mb}MB，取消下载: {response.url}"
             )
-            raise IgnoreException(f"媒体大小({size_mb:.1f}MB)超过上限({limit_mb}MB)")
+            raise MediaTooLargeException(f"媒体大小({size_mb:.1f}MB)超过上限({limit_mb}MB)")
         return content_length
 
     @staticmethod
@@ -187,7 +187,7 @@ class StreamDownloader:
             await safe_unlink(file_path)
             mb = received_bytes / 1024 / 1024
             logger.warning(f"媒体 url: {url}, 实际下载 {mb:.1f}MB 超过上限, 已丢弃")
-            raise IgnoreException(f"媒体大小({mb:.1f}MB)超过上限({max_bytes // 1024 // 1024}MB)")
+            raise MediaTooLargeException(f"媒体大小({mb:.1f}MB)超过上限({max_bytes // 1024 // 1024}MB)")
 
     @property
     def _max_bytes(self) -> int:
@@ -275,7 +275,7 @@ class StreamDownloader:
                             # 把它吞成一条日志 —— 文件反而留了下来。抛出去，由下面的
                             # except 在句柄关闭后统一删（对照 _validate_downloaded_bytes：
                             # 它在句柄外，删得掉）。
-                            raise IgnoreException(
+                            raise MediaTooLargeException(
                                 f"媒体大小超过上限({limit // 1024 // 1024}MB)"
                             )
             except BaseException:
@@ -346,7 +346,7 @@ class StreamDownloader:
                             # 同 httpx 通道：**不能在句柄内删**（Windows 上
                             # unlink 会 PermissionError(WinError 32) 并被 safe_unlink
                             # 吞掉），抛出去交给下面的 except 在句柄关闭后删。
-                            raise IgnoreException(
+                            raise MediaTooLargeException(
                                 f"媒体大小超过上限({limit // 1024 // 1024}MB)"
                             )
             except BaseException:
@@ -495,7 +495,7 @@ class StreamDownloader:
                                         f"m3u8 视频下载到 {mb:.1f}MB 超过上限 "
                                         f"{self.max_size_mb}MB，中断: {m3u8_url}"
                                     )
-                                    raise IgnoreException(
+                                    raise MediaTooLargeException(
                                         f"媒体大小超过上限({self.max_size_mb}MB)"
                                     )
 

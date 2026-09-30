@@ -34,6 +34,20 @@ class IgnoreException(ParseException):
         super().__init__(message or "可忽略异常")
 
 
+class MediaTooLargeException(IgnoreException):
+    """媒体体积超过上限，按策略跳过下载。
+
+    **单独成类而不是复用 IgnoreException**：体积超限和时长超限一样，是
+    「本来就不该下」而不是「下失败了」，两者都要在卡片上如实告诉用户
+    （见 ``data.audit_missing_media``）。而 ``IgnoreException`` 是这一族里
+    最宽的信号（还包含「0 字节响应」「m3u8 分片超限」「非全年龄内容」等），
+    靠字符串匹配消息来区分既脆弱又容易误判，所以这里用类型区分。
+
+    继承 IgnoreException 而不是另起一支：调用方现有的「捕获 IgnoreException
+    即视为策略跳过」的语义都不用改，本类只是让审计处能进一步细分。
+    """
+
+
 class MediaProcessException(ParseException):
     """本机媒体处理失败 —— 是本机环境问题，不是网络 / CDN 故障。
 

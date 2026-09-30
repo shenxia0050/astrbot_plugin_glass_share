@@ -276,7 +276,7 @@ class DeniaSharePlugin(Star):
         self._render_cache: dict[str, Path] = {}
         self._cache_cleanup_task: asyncio.Task | None = None
 
-        self._renderer = ShareCardRenderer(self.cache_dir, **pconfig.renderer_options())
+        self._renderer = ShareCardRenderer(self.cache_dir, **pconfig.renderer_options_with_auto_theme())
 
         # ========== B站 Cookie ==========
         self._bili_cookie: str = ""
@@ -921,7 +921,7 @@ class DeniaSharePlugin(Star):
                 # 与 bili_cookie.json 一起清掉，否则「看起来清了、实际还在用」。
                 await self.bili_logout()
 
-        self._renderer = ShareCardRenderer(self.cache_dir, **pconfig.renderer_options())
+        self._renderer = ShareCardRenderer(self.cache_dir, **pconfig.renderer_options_with_auto_theme())
         # 渲染参数进了产物文件名，配置变了就得让旧缓存失效
         self._render_cache.clear()
 

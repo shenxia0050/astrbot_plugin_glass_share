@@ -2,7 +2,7 @@ name: astrbot_plugin_glass_share
 display_name: "希望解析器 · Glass"
 short_desc: 链接分享自动解析，支持 B站|抖音|快手|微博|小红书|Twitter|AcFun|NGA|GitHub|Pixiv|Steam
 desc: |
-  「希望解析器」的二次修改版，在原插件基础上新增 glass 玻璃卡片布局并修复若干问题。
+  「希望解析器」的二次修改版，在原插件基础上新增 glass 玻璃卡片布局、网易云音乐/QQ音乐/小黑盒解析器，并修复若干问题。
 
   自动解析各平台分享链接，渲染为分享卡片发送，并自带 Dashboard 管理页面。
 

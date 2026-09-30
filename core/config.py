@@ -283,7 +283,34 @@ CONFIG_META: tuple[dict[str, Any], ...] = (
         "default": "dark",
         "options": ["dark", "light"],
         "labels": ["深色", "浅色"],
-        "hint": "只影响发送出去的卡片图片，与网页界面主题无关",
+        "hint": "只影响发送出去的卡片图片，与网页界面主题无关；开启下面的「按时间自动切换」后本项被忽略",
+    },
+    {
+        "key": "RENDER_THEME_AUTO",
+        "group": "卡片外观",
+        "subgroup": "基础",
+        "label": "按时间自动切换主题",
+        "type": "bool",
+        "default": False,
+        "hint": "开启后忽略「卡片主题」，白天浅色、夜间深色",
+    },
+    {
+        "key": "RENDER_THEME_DAY_RANGE",
+        "group": "卡片外观",
+        "subgroup": "基础",
+        "label": "白天时段",
+        "type": "string",
+        "default": "07:00-19:00",
+        "hint": "格式 HH:MM-HH:MM；区间内浅色、其余深色。可跨零点，如 22:00-06:00",
+    },
+    {
+        "key": "RENDER_THEME_TZ_OFFSET",
+        "group": "卡片外观",
+        "subgroup": "基础",
+        "label": "时区偏移（小时）",
+        "type": "int",
+        "default": 8,
+        "hint": "判断白天/夜间用的时区，默认 8（东八区）。容器 TZ 正确时无需改",
     },
     {
         "key": "RENDER_LAYOUT",
@@ -740,6 +767,25 @@ def migrate_grouped_config(config: Any) -> bool:
     return changed
 
 
+def _parse_hhmm(value: str) -> int | None:
+    """把 ``HH:MM`` 解析成「当天第几分钟」；非法输入返回 None。
+
+    容忍 ``7:00``（不补零）与前后空格；小时/分钟越界一律判非法，避免
+    ``25:00`` 这类输入被静默当成 1:00 而画出错误的白天区间。
+    """
+    text = (value or "").strip()
+    if ":" not in text:
+        return None
+    hh, _, mm = text.partition(":")
+    try:
+        h, m = int(hh.strip()), int(mm.strip())
+    except (TypeError, ValueError):
+        return None
+    if not (0 <= h <= 23 and 0 <= m <= 59):
+        return None
+    return h * 60 + m
+
+
 class ParserConfig:
     """解析器配置 - 由 main.py 初始化"""
 
@@ -968,6 +1014,62 @@ class ParserConfig:
         return val if val in {"dark", "light"} else "dark"
 
     @property
+    def RENDER_THEME_AUTO(self) -> bool:
+        return bool(self._cfg_get("RENDER_THEME_AUTO", False))
+
+    @property
+    def RENDER_THEME_DAY_RANGE(self) -> str:
+        return str(self._cfg_get("RENDER_THEME_DAY_RANGE", "07:00-19:00")).strip()
+
+    @property
+    def RENDER_THEME_TZ_OFFSET(self) -> int:
+        try:
+            hours = int(self._cfg_get("RENDER_THEME_TZ_OFFSET", 8))
+        except (TypeError, ValueError):
+            return 8
+        # 现实时区在 -12 ~ +14 之间；超出范围说明填错了，回退到东八区而不是报错
+        return hours if -12 <= hours <= 14 else 8
+
+    def resolved_theme(self) -> str:
+        """按配置与当前时间算出这次该用哪个主题。
+
+        **必须每次渲染时调用**，不能在构造渲染器时算一次：那样跨过白天/夜间
+        分界点之后，一直跑着的进程会停在旧主题上，直到有人改配置或重启插件。
+
+        时段解析失败（格式写错）时回退到 RENDER_THEME，不抛异常 —— 卡片渲染
+        不该因为一个时间格式写错就整条失败。
+        """
+        if not self.RENDER_THEME_AUTO:
+            return self.RENDER_THEME
+        day = self._is_daytime()
+        if day is None:  # 时段格式不合法
+            return self.RENDER_THEME
+        return "light" if day else "dark"
+
+    def _is_daytime(self) -> bool | None:
+        """当前是否落在「白天时段」内；格式不合法返回 None。"""
+        import datetime as _dt
+
+        raw = self.RENDER_THEME_DAY_RANGE
+        if "-" not in raw:
+            return None
+        start_s, _, end_s = raw.partition("-")
+        start = _parse_hhmm(start_s)
+        end = _parse_hhmm(end_s)
+        if start is None or end is None:
+            return None
+
+        now = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=self.RENDER_THEME_TZ_OFFSET)))
+        cur = now.hour * 60 + now.minute
+        s_m, e_m = start, end
+        if s_m == e_m:
+            return True  # 起止相同视为全天白天（避免出现"永远夜间"的反直觉结果）
+        if s_m < e_m:
+            return s_m <= cur < e_m
+        # 跨零点，如 22:00-06:00
+        return cur >= s_m or cur < e_m
+
+    @property
     def RENDER_LAYOUT(self) -> str:
         val = str(self._cfg_get("RENDER_LAYOUT", "glass")).strip().lower()
         return val if val in {"standard", "magazine", "immersive", "feed", "glass"} else "glass"
@@ -1039,6 +1141,17 @@ class ParserConfig:
             "gradient_top": self.RENDER_GRADIENT_TOP or None,
             "gradient_bottom": self.RENDER_GRADIENT_BOTTOM or None,
         }
+
+    def renderer_options_with_auto_theme(self) -> dict[str, Any]:
+        """给**常驻渲染器**用的参数：额外挂上按时间自动切换主题的回调。
+
+        与 ``renderer_options()`` 分开，是因为预览页面需要「用户在看哪个主题就
+        渲染哪个主题」——那边会显式覆盖 theme，不能被自动切换顶掉。
+        """
+        opts = self.renderer_options()
+        if self.RENDER_THEME_AUTO:
+            opts["theme_resolver"] = self.resolved_theme
+        return opts
 
     # ---------------- 媒体发送 ---------------- #
 
